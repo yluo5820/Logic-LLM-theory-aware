@@ -2,6 +2,7 @@ import re
 import json
 import os
 import argparse
+import numpy as np
 
 # these functions are heavily influenced by the HF squad_metrics.py script
 def normalize_text(s):
@@ -98,10 +99,24 @@ def full_evaluation(result_file):
         all_samples = json.load(f)
 
     executable_samples = [sample for sample in all_samples if sample['flag'] == 'success']
-    print(f"Overall accuracy: {evaluate_QA(all_samples)}")
-    print(f'Executable rate (Exe_Rate): {len(executable_samples)/len(all_samples)}')
-    print(f"Executable accuracy (Exe_Acc): {evaluate_QA(executable_samples)}")
+    
+    # Accuracy
+    acc = evaluate_QA(all_samples)
+    exe_rate = len(executable_samples)/len(all_samples)
+    exe_acc = evaluate_QA(executable_samples)
+    
+    print(f"Overall accuracy: {acc:.4f}")
+    print(f"Executable rate:  {exe_rate:.4f} ({len(executable_samples)}/{len(all_samples)})")
+    print(f"Executable acc:   {exe_acc:.4f}")
 
+    # Time Metrics
+    times = [s.get('inference_time', 0.0) for s in all_samples]
+    success_times = [s.get('inference_time', 0.0) for s in executable_samples]
+    
+    if times:
+        print(f"Avg Time (All):   {sum(times) / len(times):.4f}s")
+    if success_times:
+        print(f"Avg Time (Succ):  {sum(success_times) / len(success_times):.4f}s")
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -109,12 +124,13 @@ def parse_args():
     parser.add_argument("--model_name", type=str, default='text-davinci-003')
     parser.add_argument("--split", type=str, default='dev')
     parser.add_argument("--backup", type=str, default='random')
+    parser.add_argument("--solver_mode", type=str, default='generic', help="generic or theory_aware")
     args = parser.parse_args()
     return args
 
 if __name__ == "__main__":
     args = parse_args()
     result_path = f'./outputs/logic_inference'
-    result_file = os.path.join(result_path, f'{args.dataset_name}_{args.split}_{args.model_name}_backup-{args.backup}.json')
+    result_file = os.path.join(result_path, f'{args.dataset_name}_{args.split}_{args.model_name}_backup-{args.backup}_{args.solver_mode}.json')
     # evaluate_QA(result_file)
     full_evaluation(result_file)

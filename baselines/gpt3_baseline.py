@@ -139,4 +139,5 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
     gpt3_problem_reduction = GPT3_Reasoning_Graph_Baseline(args)
-    gpt3_problem_reduction.batch_reasoning_graph_generation(batch_size=10)
+    # This runs serially (Safe, steady progress)
+    gpt3_problem_reduction.reasoning_graph_generation()

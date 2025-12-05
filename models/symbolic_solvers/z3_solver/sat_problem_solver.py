@@ -1,23 +1,29 @@
 from collections import OrderedDict
 from .code_translator import *
+from .theory_aware_translator import TheoryAwareTranslator
 import subprocess
 from subprocess import check_output
 from os.path import join
 import os
 
 class LSAT_Z3_Program:
-    def __init__(self, logic_program:str, dataset_name:str) -> None:
+    def __init__(self, logic_program:str, dataset_name:str, mode:str='generic') -> None:
         self.logic_program = logic_program
+        self.dataset_name = dataset_name
+        self.mode = mode
         try:
             self.parse_logic_program()
-            self.standard_code = self.to_standard_code()
+            if self.mode == 'theory_aware':
+                self.standard_code = self.to_theory_aware_code()
+            else:
+                self.standard_code = self.to_standard_code()
         except Exception as e:
             self.standard_code = None
             self.flag = False
             return
         
         self.flag = True
-        self.dataset_name = dataset_name
+
 
         # create the folder to save the Pyke program
         cache_dir = os.path.join(os.path.dirname(__file__), '.cache_program')
@@ -166,6 +172,16 @@ class LSAT_Z3_Program:
 
         return CodeTranslator.assemble_standard_code(declaration_lines, pre_condidtion_lines, option_blocks)
     
+    def to_theory_aware_code(self):
+        translator = TheoryAwareTranslator(
+            self.declared_enum_sorts,
+            self.declared_int_sorts,
+            self.declared_lists,
+            self.declared_functions,
+            dataset_name=self.dataset_name
+        )
+        return translator.translate(self.constraints, self.options)
+    
     def execute_program(self):
         filename = join(self.cache_dir, f'tmp.py')
         with open(filename, "w") as f:
@@ -187,7 +203,22 @@ class LSAT_Z3_Program:
     def answer_mapping(self, answer):
         mapping = {'(A)': 'A', '(B)': 'B', '(C)': 'C', '(D)': 'D', '(E)': 'E',
                    'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D', 'E': 'E'}
-        return mapping[answer[0].strip()]
+        
+        # Ensure we have a list of strings
+        if isinstance(answer, str):
+            lines = answer.splitlines()
+        else:
+            lines = list(answer)
+
+        # Iterate through lines to find the first valid option
+        for line in lines:
+            clean_line = line.strip()
+            # If the line matches one of our expected keys (A, B, (A), etc.)
+            if clean_line in mapping:
+                return mapping[clean_line]
+        
+        # If we loop through everything and find nothing (or only warnings)
+        return None
 
 if __name__=="__main__":
     logic_program = '''# Declarations

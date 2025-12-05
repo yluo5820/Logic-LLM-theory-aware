@@ -11,6 +11,7 @@ import random
 from backup_answer_generation import Backup_Answer_Generator
 from utils import OpenAIModel
 
+
 class SelfRefinementEngine:
     def __init__(self, args, current_round):
         self.args = args
@@ -20,6 +21,7 @@ class SelfRefinementEngine:
         self.backup_strategy = args.backup_strategy
         self.openai_api = OpenAIModel(args.api_key, 'gpt-4', args.stop_words, args.max_new_tokens)
         self.current_round = current_round
+        self.solver_mode = args.solver_mode
 
         self.logic_programs = self.load_logic_programs()
         # self.reasoning_results = self.load_inference_results()
@@ -47,7 +49,7 @@ class SelfRefinementEngine:
         return full_prompt
 
     def safe_execute_program(self, id, logic_program, debug = False):
-        program = self.program_executor(logic_program, self.dataset_name)
+        program = self.program_executor(logic_program, self.dataset_name, mode=self.solver_mode)
         # cannot parse the program
         if program.flag == False:
             answer = self.backup_generator.get_backup_answer(id)
@@ -131,6 +133,7 @@ def parse_args():
     parser.add_argument('--api_key', type=str)
     parser.add_argument('--stop_words', type=str, default='------')
     parser.add_argument('--max_new_tokens', type=int, default=1024)
+    parser.add_argument('--solver_mode', type=str, default='generic', choices=['generic', 'theory_aware'])
     args = parser.parse_args()
     return args
 

@@ -169,4 +169,4 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
     logic_program_generator = LogicProgramGenerator(args)
-    logic_program_generator.batch_logic_program_generation()
+    logic_program_generator.logic_program_generation()
