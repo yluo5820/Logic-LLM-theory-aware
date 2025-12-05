@@ -35,7 +35,7 @@ class SelfRefinementEngine:
         prefix = ""
         if self.current_round > 1:
             prefix = f'self-refine-{self.current_round-1}_'
-        with open(os.path.join('./outputs/logic_programs', f'{prefix}{self.dataset_name}_{self.split}_{self.model_name}.json')) as f:
+        with open(os.path.join('./outputs/logic_programs', f'{prefix}{self.dataset_name}_{self.split}_{"gpt-4"}_{self.solver_mode}.json')) as f:
             dataset = json.load(f)
         print(f"Loaded {len(dataset)} examples from {self.split} split.")
         return dataset
@@ -77,49 +77,99 @@ class SelfRefinementEngine:
         return answer, 'success', error_message
     
     def single_round_self_refinement(self):
+        """
+        Run one round of self-refinement.
+
+        - Uses the solver (with self.solver_mode) to execute each logic program.
+        - If parsing/execution fails, calls the LLM to refine the program.
+        - Writes progress to disk after each example.
+        - If an output file for this round already exists, it resumes:
+          examples whose IDs are already present are skipped.
+        """
+        # Where we save the current round
+        save_path = f'./outputs/logic_programs/self-refine-{self.current_round}_{self.dataset_name}_{self.split}_{self.model_name}_{self.solver_mode}.json'
+
+        # ---- 1. Load existing partial results (for resume) ----
+        existing_outputs = []
+        processed_ids = set()
+        if os.path.exists(save_path):
+            try:
+                with open(save_path, 'r') as f:
+                    existing_outputs = json.load(f)
+                processed_ids = {ex["id"] for ex in existing_outputs}
+                print(f"[SelfRefinement] Resuming round {self.current_round}: "
+                      f"found {len(existing_outputs)} already-processed examples.")
+            except Exception as e:
+                print(f"[SelfRefinement] Warning: could not load existing file '{save_path}': {e}")
+                existing_outputs = []
+                processed_ids = set()
+
+        # Fast lookup for existing entries by id
+        existing_by_id = {ex["id"]: ex for ex in existing_outputs}
+
+        # We'll rebuild outputs in dataset order, reusing existing entries when possible
         outputs = []
         for example in tqdm(self.logic_programs):
+            ex_id = example['id']
+
+            # ---- 2. If we've already processed this ID in this round, reuse it ----
+            if ex_id in processed_ids:
+                outputs.append(existing_by_id[ex_id])
+                continue
+
+            # ---- 3. Otherwise, run solver + (if needed) LLM refinement ----
             logic_program = example['raw_logic_programs'][0].strip()
-            answer, status, error_message = self.safe_execute_program(example['id'], logic_program)
+            answer, status, error_message = self.safe_execute_program(ex_id, logic_program)
 
             if status == 'execution error':
-                if not error_message == 'No Output': # this is not execution error, but parsing error
-                    # perform self-correction based on the error message
+                # execution error with some error message (real failure)
+                if error_message != 'No Output':
                     full_prompt = self.load_prompt(logic_program, error_message)
                     revised_program = self.openai_api.generate(full_prompt).strip()
                     programs = [revised_program]
-                    output = {'id': example['id'], 
-                            'context': example['context'],
-                            'question': example['question'], 
-                            'answer': example['answer'],
-                            'options': example['options'],
-                            'raw_logic_programs': programs}
-                    outputs.append(output)
+                    output = {
+                        'id': example['id'],
+                        'context': example['context'],
+                        'question': example['question'],
+                        'answer': example['answer'],
+                        'options': example['options'],
+                        'raw_logic_programs': programs,
+                    }
                 else:
-                    outputs.append(example)
+                    # "No Output" is treated as non-fatal here - keep original
+                    output = example
+
             elif status == 'parsing error':
-                # perform self-correction based on the error message
+                # parsing error: ask LLM to rewrite from scratch
                 full_prompt = self.load_prompt(logic_program, 'Parsing Error')
                 revised_program = self.openai_api.generate(full_prompt).strip()
                 programs = [revised_program]
-                output = {'id': example['id'], 
-                        'context': example['context'],
-                        'question': example['question'], 
-                        'answer': example['answer'],
-                        'options': example['options'],
-                        'raw_logic_programs': programs}
-                outputs.append(output)
+                output = {
+                    'id': example['id'],
+                    'context': example['context'],
+                    'question': example['question'],
+                    'answer': example['answer'],
+                    'options': example['options'],
+                    'raw_logic_programs': programs,
+                }
+
             else:
-                outputs.append(example)
+                # status == 'success': keep original example untouched
+                output = example
 
-        # save results
-        if not os.path.exists('./outputs/logic_programs'):
-            os.makedirs('./outputs/logic_programs')
+            # Append to in-memory list
+            outputs.append(output)
 
-        # save outputs
-        save_path = f'./outputs/logic_programs/self-refine-{self.current_round}_{self.dataset_name}_{self.split}_{self.model_name}.json'
-        with open(save_path, 'w') as f:
-            json.dump(outputs, f, indent=2, ensure_ascii=False)
+            # ---- 4. Incremental save after EACH example ----
+            # This ensures that if the script crashes (e.g., OpenAI 502),
+            # all previous results are already on disk, and we can resume.
+            with open(save_path, 'w') as f:
+                json.dump(outputs, f, indent=2, ensure_ascii=False)
+
+        # Done. The final file is already written by the last iteration.
+        print(f"[SelfRefinement] Round {self.current_round} completed. "
+              f"Saved {len(outputs)} examples to {save_path}.")
+
     
 def parse_args():
     parser = argparse.ArgumentParser()

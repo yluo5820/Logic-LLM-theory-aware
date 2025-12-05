@@ -219,9 +219,7 @@ class CodeTranslator:
     def assemble_standard_code(declaration_lines, pre_condidtion_lines, option_blocks):
         lines = []
 
-        header_lines = [
-            "from z3 import *", ""
-        ]
+        header_lines = ["from z3 import *", "import json", ""]
 
         lines += header_lines
         lines += [x.line for x in declaration_lines]
@@ -236,11 +234,20 @@ class CodeTranslator:
         lines += [""]
 
         function_lines = [
+            "def print_stats(s):",
+            TAB_STR + "try:",
+            TAB_STR + TAB_STR + "stats = s.statistics()",
+            TAB_STR + TAB_STR + "d = {k: v for k, v in stats}",
+            TAB_STR + TAB_STR + "print(f'STATS:::{json.dumps(d)}')",
+            TAB_STR + "except: pass",
+            "",
             "def is_valid(option_constraints):",
             TAB_STR + "solver = Solver()",
             TAB_STR + "solver.add(pre_conditions)",
             TAB_STR + "solver.add(Not(option_constraints))",
-            TAB_STR + "return solver.check() == unsat",
+            TAB_STR + "res = solver.check()",
+            TAB_STR + "print_stats(solver)", # <--- Added
+            TAB_STR + "return res == unsat",
             "",
             "def is_unsat(option_constraints):",
             TAB_STR + "solver = Solver()",

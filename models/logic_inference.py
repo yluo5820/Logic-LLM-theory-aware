@@ -6,6 +6,7 @@ from symbolic_solvers.pyke_solver.pyke_solver import Pyke_Program
 from symbolic_solvers.csp_solver.csp_solver import CSP_Program
 from symbolic_solvers.z3_solver.sat_problem_solver import LSAT_Z3_Program
 import argparse
+from collections import defaultdict
 import random
 import time
 from backup_answer_generation import Backup_Answer_Generator
@@ -24,7 +25,7 @@ class LogicInferenceEngine:
         program_executor_map = {'FOLIO': FOL_Prover9_Program, 
                                 'ProntoQA': Pyke_Program, 
                                 'ProofWriter': Pyke_Program,
-                                'LogicalDeduction': CSP_Program,
+                                'LogicalDeduction': LSAT_Z3_Program,
                                 'AR-LSAT': LSAT_Z3_Program}
         self.program_executor = program_executor_map[self.dataset_name]
         self.backup_generator = Backup_Answer_Generator(self.dataset_name, self.backup_strategy, self.args.backup_LLM_result_path)
@@ -48,7 +49,7 @@ class LogicInferenceEngine:
         # 1. Parsing Check
         if program.flag == False:
             answer = self.backup_generator.get_backup_answer(id)
-            return answer, 'parsing error', 'Program init failed', 0.0
+            return answer, 'parsing error', 'Program init failed', 0.0, {}
 
         # 2. Execution with Timing
         start_time = time.time()
@@ -59,22 +60,51 @@ class LogicInferenceEngine:
             error_message = str(e)
         end_time = time.time()
         duration = end_time - start_time
+        
+        # --- DYNAMIC STATS AGGREGATION ---
+        # We use a defaultdict to sum up ANY key Z3 throws at us
+        aggregated_stats = defaultdict(float)
+        max_memory = 0.0
+        
+        if answer:
+            lines = answer.splitlines() if isinstance(answer, str) else answer
+            for line in lines:
+                if line.strip().startswith("STATS:::"):
+                    try:
+                        json_str = line.strip().replace("STATS:::", "")
+                        stats = json.loads(json_str)
+                        
+                        # Dynamically add every metric found
+                        for k, v in stats.items():
+                            if k == "memory":
+                                # Memory is max, not sum
+                                max_memory = max(max_memory, float(v))
+                            else:
+                                # Assume everything else is a counter (conflicts, pivots, etc)
+                                # and sum it up across the 5 options
+                                aggregated_stats[k] += int(v)
+                                
+                    except:
+                        pass
+        
+        solver_stats = dict(aggregated_stats)
+        solver_stats['memory'] = max_memory
 
         # 3. Handle Results
         if answer is None:
             # Distinguish between Timeout and Logic Error
             status = 'timeout' if 'Timeout' in error_message else 'execution error'
             final_ans = self.backup_generator.get_backup_answer(id)
-            return final_ans, status, error_message, duration
+            return final_ans, status, error_message, duration, solver_stats
         
         # 4. Map Answer
         final_ans = program.answer_mapping(answer)
         if final_ans is None:
             # Solver ran but produced no valid option (A-E)
             final_ans = self.backup_generator.get_backup_answer(id)
-            return final_ans, 'mapping error', 'No valid option found in output', duration
+            return final_ans, 'mapping error', 'No valid option found in output', duration, solver_stats
 
-        return final_ans, 'success', '', duration
+        return final_ans, 'success', '', duration, solver_stats
 
     def inference_on_dataset(self):
         outputs = []
@@ -82,7 +112,7 @@ class LogicInferenceEngine:
         
         for example in tqdm(self.dataset):
             # Execute
-            answer, flag, error_message, duration = self.safe_execute_program(example['id'], example['raw_logic_programs'][0].strip())
+            answer, flag, error_message, duration, solver_stats = self.safe_execute_program(example['id'], example['raw_logic_programs'][0].strip())
             
             # Update stats
             if flag in stats:
@@ -98,7 +128,8 @@ class LogicInferenceEngine:
                 'answer': example['answer'],
                 'flag': flag,
                 'error_message': error_message,
-                'inference_time': duration, # <--- Metric added
+                'inference_time': duration,
+                'solver_stats': solver_stats,
                 'predicted_answer': answer
             }
             outputs.append(output)

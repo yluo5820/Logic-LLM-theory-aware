@@ -118,6 +118,37 @@ def full_evaluation(result_file):
     if success_times:
         print(f"Avg Time (Succ):  {sum(success_times) / len(success_times):.4f}s")
 
+    # --- DYNAMIC COMPLEXITY METRICS ---
+    if executable_samples:
+        print("-" * 40)
+        print(f"Solver Statistics (Average per Problem)")
+        print("-" * 40)
+        
+        # 1. Collect ALL unique keys present across all successful samples
+        all_keys = set()
+        for s in executable_samples:
+            if 'solver_stats' in s:
+                all_keys.update(s['solver_stats'].keys())
+        
+        # 2. Calculate average for each key
+        # (If a problem didn't report a key, we treat it as 0)
+        stats_summary = []
+        for key in all_keys:
+            total_val = 0
+            for s in executable_samples:
+                total_val += s.get('solver_stats', {}).get(key, 0)
+            
+            avg_val = total_val / len(executable_samples)
+            stats_summary.append((key, avg_val))
+        
+        # 3. Print sorted by key name
+        stats_summary.sort(key=lambda x: x[0])
+        
+        for key, avg in stats_summary:
+            # Formatting: 2 decimal places for floats
+            print(f"  {key:<25}: {avg:.2f}")
+        print("-" * 40)
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str)
