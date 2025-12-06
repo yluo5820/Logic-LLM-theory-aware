@@ -2,19 +2,27 @@ import re
 import json
 from itertools import product
 
+
 class TheoryAwareTranslator:
     """
     Translates CLOVER DSL into Theory-Aware Z3 code (QF_LIA).
-    Optimized for AR-LSAT (Finite Domain Constraints).
+    Optimized for AR-LSAT.
     """
 
-    def __init__(self, declared_enums, declared_ints, declared_lists, declared_functions, dataset_name="AR-LSAT"):
+    def __init__(
+        self,
+        declared_enums,
+        declared_ints,
+        declared_lists,
+        declared_functions,
+        dataset_name="AR-LSAT",
+    ):
         self.enums = declared_enums
         self.ints = declared_ints
         self.lists = declared_lists
         self.funcs = declared_functions
         self.dataset_name = dataset_name
-        
+
         self.all_sorts = {}
         self.all_sorts.update(self.enums)
         self.all_sorts.update(self.ints)
@@ -22,16 +30,14 @@ class TheoryAwareTranslator:
 
     def clean_name(self, name):
         """Sanitizes names to ensure valid Python identifiers."""
-        # Remove quotes that LLMs sometimes hallucinate
         name = str(name).strip("'").strip('"')
-        # Replace spaces/dashes with underscores
         name = name.replace(" ", "_").replace("-", "_")
         return name
 
     def generate_preamble(self):
         lines = [
             "from z3 import *",
-            "import json",  # <--- REQUIRED for stats logging
+            "import json",
             "",
             "def BoolToInt(b): return If(b, 1, 0)",
             "def is_exception(x): return not x",
@@ -69,12 +75,13 @@ class TheoryAwareTranslator:
             "",
             "pre_conditions = []",
             "",
-            "# --- Constants & Sorts ---"
+            "# --- Constants & Sorts ---",
         ]
-        
+
         for name, members in self.all_sorts.items():
-            if all(str(m).isdigit() for m in members): continue
-            
+            if all(str(m).isdigit() for m in members):
+                continue
+
             lines.append(f"# Sort: {name}")
             for i, member in enumerate(members):
                 clean = self.clean_name(member)
@@ -85,13 +92,15 @@ class TheoryAwareTranslator:
         for f_name, args in self.funcs.items():
             domain_sorts = args[:-1]
             codomain_sort = args[-1]
-            
+
             domain_values_list = []
             for sort in domain_sorts:
                 if sort in self.all_sorts:
                     domain_values_list.append(self.all_sorts[sort])
-                elif sort == 'int' or sort == 'bool':
-                     raise ValueError(f"Cannot unroll infinite sort '{sort}' in function '{f_name}'.")
+                elif sort == "int" or sort == "bool":
+                    raise ValueError(
+                        f"Cannot unroll infinite sort '{sort}' in function '{f_name}'."
+                    )
 
             min_val, max_val = 1, 10
             if codomain_sort in self.all_sorts:
@@ -103,18 +112,26 @@ class TheoryAwareTranslator:
                     min_val, max_val = 1, len(vals)
             elif codomain_sort == "bool":
                 min_val, max_val = 0, 1
-            
+
             for combo in product(*domain_values_list):
                 clean_combo = [self.clean_name(c) for c in combo]
                 var_name = f"{self.clean_name(f_name)}_{'_'.join(clean_combo)}"
                 lines.append(f"{var_name} = Int('{var_name}')")
-                lines.append(f"pre_conditions.append(And({var_name} >= {min_val}, {var_name} <= {max_val}))")
+                lines.append(
+                    f"pre_conditions.append(And({var_name} >= {min_val}, {var_name} <= {max_val}))"
+                )
             lines.append("")
-            
+
         return lines
 
-    def extract_paired_token_index(self, statement, start_index, left_token, right_token):
-        if start_index < 0 or start_index >= len(statement) or statement[start_index] != left_token:
+    def extract_paired_token_index(
+        self, statement, start_index, left_token, right_token
+    ):
+        if (
+            start_index < 0
+            or start_index >= len(statement)
+            or statement[start_index] != left_token
+        ):
             return -1
         level = 1
         for i in range(start_index + 1, len(statement)):
@@ -134,14 +151,17 @@ class TheoryAwareTranslator:
         return expr
 
     def resolve_functions(self, expr):
-        if not self.funcs: return expr
+        if not self.funcs:
+            return expr
         func_names = [re.escape(k) for k in self.funcs.keys()]
         pattern = r"\b(" + "|".join(func_names) + r")\s*\(([^)]+)\)"
+
         def replacer(match):
             f_name = match.group(1)
             args_str = match.group(2)
             args = [self.clean_name(x.strip()) for x in args_str.split(",")]
             return f"{self.clean_name(f_name)}_{'_'.join(args)}"
+
         return re.sub(pattern, replacer, expr)
 
     def recursive_translate(self, stmt, scope):
@@ -149,7 +169,7 @@ class TheoryAwareTranslator:
         keywords = ["ForAll", "Exists", "Count", "Distinct"]
         first_kw = None
         min_idx = len(stmt)
-        
+
         for kw in keywords:
             match = re.search(r"\b" + kw + r"\s*\(", stmt)
             if match and match.start() < min_idx:
@@ -159,21 +179,22 @@ class TheoryAwareTranslator:
         if first_kw:
             open_paren = stmt.find("(", min_idx)
             scope_start = stmt.find("[", open_paren)
-            scope_end = self.extract_paired_token_index(stmt, scope_start, '[', ']')
-            close_paren = self.extract_paired_token_index(stmt, open_paren, '(', ')')
-            
+            scope_end = self.extract_paired_token_index(stmt, scope_start, "[", "]")
+            close_paren = self.extract_paired_token_index(stmt, open_paren, "(", ")")
+
             if scope_start != -1 and scope_end != -1 and close_paren != -1:
                 prefix = stmt[:min_idx]
-                suffix = stmt[close_paren+1:]
-                var_decl_str = stmt[scope_start+1 : scope_end]
-                body_str = stmt[scope_end+1 : close_paren].strip()
-                if body_str.startswith(","): body_str = body_str[1:].strip()
-                
+                suffix = stmt[close_paren + 1 :]
+                var_decl_str = stmt[scope_start + 1 : scope_end]
+                body_str = stmt[scope_end + 1 : close_paren].strip()
+                if body_str.startswith(","):
+                    body_str = body_str[1:].strip()
+
                 vars_def = []
-                for v in var_decl_str.split(','):
+                for v in var_decl_str.split(","):
                     v = v.strip()
-                    if ':' in v:
-                        v_name, v_sort = v.split(':')
+                    if ":" in v:
+                        v_name, v_sort = v.split(":")
                         vars_def.append((v_name.strip(), v_sort.strip()))
 
                 iterables = []
@@ -194,14 +215,20 @@ class TheoryAwareTranslator:
                     else:
                         unrolled_parts.append(trans_body)
 
-                if first_kw == "ForAll": replacement = f"And({', '.join(unrolled_parts)})"
-                elif first_kw == "Exists": replacement = f"Or({', '.join(unrolled_parts)})"
-                elif first_kw == "Count": replacement = f"Sum({', '.join(unrolled_parts)})"
-                elif first_kw == "Distinct": replacement = f"Distinct({', '.join(unrolled_parts)})"
+                if first_kw == "ForAll":
+                    replacement = f"And({', '.join(unrolled_parts)})"
+                elif first_kw == "Exists":
+                    replacement = f"Or({', '.join(unrolled_parts)})"
+                elif first_kw == "Count":
+                    replacement = f"Sum({', '.join(unrolled_parts)})"
+                elif first_kw == "Distinct":
+                    replacement = f"Distinct({', '.join(unrolled_parts)})"
 
-                return (self.recursive_translate(prefix, scope) + 
-                        replacement + 
-                        self.recursive_translate(suffix, scope))
+                return (
+                    self.recursive_translate(prefix, scope)
+                    + replacement
+                    + self.recursive_translate(suffix, scope)
+                )
 
         stmt = self.substitute_bound_vars(stmt, scope)
         stmt = self.resolve_functions(stmt)
@@ -213,12 +240,13 @@ class TheoryAwareTranslator:
         for c in constraints:
             t_c = self.recursive_translate(c, {})
             code_lines.append(f"pre_conditions.append({t_c})")
-        
+
         code_lines.append("")
         code_lines.append("# --- Options / Query ---")
-        if isinstance(options, str): options = [options]
+        if isinstance(options, str):
+            options = [options]
         for i, opt in enumerate(options):
             t_opt = self.recursive_translate(opt, {})
             code_lines.append(f"if {t_opt}: print('({chr(65+i)})')")
-            
+
         return "\n".join(code_lines)

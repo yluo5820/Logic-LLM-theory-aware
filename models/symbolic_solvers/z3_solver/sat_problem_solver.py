@@ -6,14 +6,17 @@ from subprocess import check_output
 from os.path import join
 import os
 
+
 class LSAT_Z3_Program:
-    def __init__(self, logic_program:str, dataset_name:str, mode:str='generic') -> None:
+    def __init__(
+        self, logic_program: str, dataset_name: str, mode: str = "generic"
+    ) -> None:
         self.logic_program = logic_program
         self.dataset_name = dataset_name
         self.mode = mode
         try:
             self.parse_logic_program()
-            if self.mode == 'theory_aware':
+            if self.mode == "theory_aware":
                 self.standard_code = self.to_theory_aware_code()
             else:
                 self.standard_code = self.to_standard_code()
@@ -21,12 +24,10 @@ class LSAT_Z3_Program:
             self.standard_code = None
             self.flag = False
             return
-        
+
         self.flag = True
 
-
-        # create the folder to save the Pyke program
-        cache_dir = os.path.join(os.path.dirname(__file__), '.cache_program')
+        cache_dir = os.path.join(os.path.dirname(__file__), ".cache_program")
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
         self.cache_dir = cache_dir
@@ -38,19 +39,33 @@ class LSAT_Z3_Program:
         decleration_start_index = lines.index("# Declarations")
         constraint_start_index = lines.index("# Constraints")
         option_start_index = lines.index("# Options")
- 
-        declaration_statements = lines[decleration_start_index + 1:constraint_start_index]
-        constraint_statements = lines[constraint_start_index + 1:option_start_index]
-        option_statements = lines[option_start_index + 1:]
+
+        declaration_statements = lines[
+            decleration_start_index + 1 : constraint_start_index
+        ]
+        constraint_statements = lines[constraint_start_index + 1 : option_start_index]
+        option_statements = lines[option_start_index + 1 :]
 
         try:
-            (self.declared_enum_sorts, self.declared_int_sorts, self.declared_lists, self.declared_functions, self.variable_constrants) = self.parse_declaration_statements(declaration_statements)
+            (
+                self.declared_enum_sorts,
+                self.declared_int_sorts,
+                self.declared_lists,
+                self.declared_functions,
+                self.variable_constrants,
+            ) = self.parse_declaration_statements(declaration_statements)
 
-            self.constraints = [x.split(':::')[0].strip() for x in constraint_statements]
-            self.options = [x.split(':::')[0].strip() for x in option_statements if not x.startswith("Question :::")]
+            self.constraints = [
+                x.split(":::")[0].strip() for x in constraint_statements
+            ]
+            self.options = [
+                x.split(":::")[0].strip()
+                for x in option_statements
+                if not x.startswith("Question :::")
+            ]
         except Exception as e:
             return False
-        
+
         return True
 
     def __repr__(self):
@@ -60,34 +75,46 @@ class LSAT_Z3_Program:
         enum_sort_declarations = OrderedDict()
         int_sort_declarations = OrderedDict()
         function_declarations = OrderedDict()
-        pure_declaration_statements = [x for x in declaration_statements if "Sort" in x or "Function" in x]
-        variable_constrant_statements = [x for x in declaration_statements if not "Sort" in x and not "Function" in x]
+        pure_declaration_statements = [
+            x for x in declaration_statements if "Sort" in x or "Function" in x
+        ]
+        variable_constrant_statements = [
+            x for x in declaration_statements if not "Sort" in x and not "Function" in x
+        ]
         for s in pure_declaration_statements:
             if "EnumSort" in s:
                 sort_name = s.split("=")[0].strip()
-                sort_member_str = s.split("=")[1].strip()[len("EnumSort("):-1]
+                sort_member_str = s.split("=")[1].strip()[len("EnumSort(") : -1]
                 sort_members = [x.strip() for x in sort_member_str[1:-1].split(",")]
                 enum_sort_declarations[sort_name] = sort_members
             elif "IntSort" in s:
                 sort_name = s.split("=")[0].strip()
-                sort_member_str = s.split("=")[1].strip()[len("IntSort("):-1]
+                sort_member_str = s.split("=")[1].strip()[len("IntSort(") : -1]
                 sort_members = [x.strip() for x in sort_member_str[1:-1].split(",")]
                 int_sort_declarations[sort_name] = sort_members
             elif "Function" in s:
                 function_name = s.split("=")[0].strip()
                 if "->" in s and "[" not in s:
-                    function_args_str = s.split("=")[1].strip()[len("Function("):]
-                    function_args_str = function_args_str.replace("->", ",").replace("(", "").replace(")", "")
+                    function_args_str = s.split("=")[1].strip()[len("Function(") :]
+                    function_args_str = (
+                        function_args_str.replace("->", ",")
+                        .replace("(", "")
+                        .replace(")", "")
+                    )
                     function_args = [x.strip() for x in function_args_str.split(",")]
                     function_declarations[function_name] = function_args
                 elif "->" in s and "[" in s:
-                    function_args_str = s.split("=")[1].strip()[len("Function("):-1]
-                    function_args_str = function_args_str.replace("->", ",").replace("[", "").replace("]", "")
+                    function_args_str = s.split("=")[1].strip()[len("Function(") : -1]
+                    function_args_str = (
+                        function_args_str.replace("->", ",")
+                        .replace("[", "")
+                        .replace("]", "")
+                    )
                     function_args = [x.strip() for x in function_args_str.split(",")]
                     function_declarations[function_name] = function_args
                 else:
                     # legacy way
-                    function_args_str = s.split("=")[1].strip()[len("Function("):-1]
+                    function_args_str = s.split("=")[1].strip()[len("Function(") : -1]
                     function_args = [x.strip() for x in function_args_str.split(",")]
                     function_declarations[function_name] = function_args
             else:
@@ -110,21 +137,33 @@ class LSAT_Z3_Program:
             self.declared_int_lists[name] = members
             # declared_lists[name] = members
 
-        return declared_enum_sorts, int_sort_declarations, declared_lists, declared_functions, variable_constrant_statements
-    
+        return (
+            declared_enum_sorts,
+            int_sort_declarations,
+            declared_lists,
+            declared_functions,
+            variable_constrant_statements,
+        )
+
     def to_standard_code(self):
         declaration_lines = []
         # translate enum sorts
         for name, members in self.declared_enum_sorts.items():
-            declaration_lines += CodeTranslator.translate_enum_sort_declaration(name, members)
+            declaration_lines += CodeTranslator.translate_enum_sort_declaration(
+                name, members
+            )
 
         # translate int sorts
         for name, members in self.declared_int_sorts.items():
-            declaration_lines += CodeTranslator.translate_int_sort_declaration(name, members)
+            declaration_lines += CodeTranslator.translate_int_sort_declaration(
+                name, members
+            )
 
         # translate lists
         for name, members in self.declared_lists.items():
-            declaration_lines += CodeTranslator.translate_list_declaration(name, members)
+            declaration_lines += CodeTranslator.translate_list_declaration(
+                name, members
+            )
 
         scoped_list_to_type = {}
         for name, members in self.declared_lists.items():
@@ -135,23 +174,30 @@ class LSAT_Z3_Program:
 
         for name, members in self.declared_int_lists.items():
             scoped_list_to_type[name] = CodeTranslator.ListValType.INT
-        
+
         # translate functions
         for name, args in self.declared_functions.items():
-            declaration_lines += CodeTranslator.translate_function_declaration(name, args)
+            declaration_lines += CodeTranslator.translate_function_declaration(
+                name, args
+            )
 
         pre_condidtion_lines = []
 
         for constraint in self.constraints:
-            pre_condidtion_lines += CodeTranslator.translate_constraint(constraint, scoped_list_to_type)
+            pre_condidtion_lines += CodeTranslator.translate_constraint(
+                constraint, scoped_list_to_type
+            )
 
         # additional function scope control
         for name, args in self.declared_functions.items():
-            if args[-1] in scoped_list_to_type and scoped_list_to_type[args[-1]] == CodeTranslator.ListValType.INT:
+            if (
+                args[-1] in scoped_list_to_type
+                and scoped_list_to_type[args[-1]] == CodeTranslator.ListValType.INT
+            ):
                 # FIX
                 if args[-1] in self.declared_int_lists:
                     continue
-                
+
                 list_range = [int(x) for x in self.declared_lists[args[-1]]]
                 assert list_range[-1] - list_range[0] == len(list_range) - 1
                 scoped_vars = [x[0] + str(i) for i, x in enumerate(args[:-1])]
@@ -159,51 +205,74 @@ class LSAT_Z3_Program:
 
                 additional_cons = "ForAll([{}], And({} <= {}, {} <= {}))".format(
                     ", ".join([f"{a}:{b}" for a, b in zip(scoped_vars, args[:-1])]),
-                    list_range[0], func_call, func_call, list_range[-1]
+                    list_range[0],
+                    func_call,
+                    func_call,
+                    list_range[-1],
                 )
-                pre_condidtion_lines += CodeTranslator.translate_constraint(additional_cons, scoped_list_to_type)
-
+                pre_condidtion_lines += CodeTranslator.translate_constraint(
+                    additional_cons, scoped_list_to_type
+                )
 
         for constraint in self.constraints:
-            pre_condidtion_lines += CodeTranslator.translate_constraint(constraint, scoped_list_to_type)
+            pre_condidtion_lines += CodeTranslator.translate_constraint(
+                constraint, scoped_list_to_type
+            )
 
         # each block should express one option
-        option_blocks = [CodeTranslator.translate_constraint(option, scoped_list_to_type) for option in self.options]
+        option_blocks = [
+            CodeTranslator.translate_constraint(option, scoped_list_to_type)
+            for option in self.options
+        ]
 
-        return CodeTranslator.assemble_standard_code(declaration_lines, pre_condidtion_lines, option_blocks)
-    
+        return CodeTranslator.assemble_standard_code(
+            declaration_lines, pre_condidtion_lines, option_blocks
+        )
+
     def to_theory_aware_code(self):
         translator = TheoryAwareTranslator(
             self.declared_enum_sorts,
             self.declared_int_sorts,
             self.declared_lists,
             self.declared_functions,
-            dataset_name=self.dataset_name
+            dataset_name=self.dataset_name,
         )
         return translator.translate(self.constraints, self.options)
-    
+
     def execute_program(self):
-        filename = join(self.cache_dir, f'tmp.py')
+        filename = join(self.cache_dir, f"tmp.py")
         with open(filename, "w") as f:
             f.write(self.standard_code)
         try:
-            output = check_output(["python", filename], stderr=subprocess.STDOUT, timeout=1.0)
+            output = check_output(
+                ["python", filename], stderr=subprocess.STDOUT, timeout=1.0
+            )
         except subprocess.CalledProcessError as e:
             outputs = e.output.decode("utf-8").strip().splitlines()[-1]
             return None, outputs
         except subprocess.TimeoutExpired:
-            return None, 'TimeoutError'
+            return None, "TimeoutError"
         output = output.decode("utf-8").strip()
         result = output.splitlines()
         if len(result) == 0:
-            return None, 'No Output'
-        
+            return None, "No Output"
+
         return result, ""
-    
+
     def answer_mapping(self, answer):
-        mapping = {'(A)': 'A', '(B)': 'B', '(C)': 'C', '(D)': 'D', '(E)': 'E',
-                   'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D', 'E': 'E'}
-        
+        mapping = {
+            "(A)": "A",
+            "(B)": "B",
+            "(C)": "C",
+            "(D)": "D",
+            "(E)": "E",
+            "A": "A",
+            "B": "B",
+            "C": "C",
+            "D": "D",
+            "E": "E",
+        }
+
         # Ensure we have a list of strings
         if isinstance(answer, str):
             lines = answer.splitlines()
@@ -216,12 +285,13 @@ class LSAT_Z3_Program:
             # If the line matches one of our expected keys (A, B, (A), etc.)
             if clean_line in mapping:
                 return mapping[clean_line]
-        
+
         # If we loop through everything and find nothing (or only warnings)
         return None
 
-if __name__=="__main__":
-    logic_program = '''# Declarations
+
+if __name__ == "__main__":
+    logic_program = """# Declarations
 people = EnumSort([Vladimir, Wendy])
 meals = EnumSort([breakfast, lunch, dinner, snack])
 foods = EnumSort([fish, hot_cakes, macaroni, omelet, poached_eggs])
@@ -242,9 +312,9 @@ is_valid(Exists([m:meals], eats(Vladimir, m) == fish)) ::: (A)
 is_valid(Exists([m:meals], eats(Vladimir, m) == hot_cakes)) ::: (B)
 is_valid(Exists([m:meals], eats(Vladimir, m) == macaroni)) ::: (C)
 is_valid(Exists([m:meals], eats(Vladimir, m) == omelet)) ::: (D)
-is_valid(Exists([m:meals], eats(Vladimir, m) == poached_eggs)) ::: (E)'''
+is_valid(Exists([m:meals], eats(Vladimir, m) == poached_eggs)) ::: (E)"""
 
-    z3_program = LSAT_Z3_Program(logic_program, 'AR-LSAT')
+    z3_program = LSAT_Z3_Program(logic_program, "AR-LSAT")
     print(z3_program.standard_code)
 
     output, error_message = z3_program.execute_program()
